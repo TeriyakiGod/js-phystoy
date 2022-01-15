@@ -4,20 +4,27 @@ const ctx = canvas.getContext('2d');
 //World properties
 let drag = 0.1;
 
-//Simulation
-function simulate() {
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    objects.forEach((obj) => {
-        obj.calculate();
-        obj.draw();
-        obj.drawVectors();
-        if (obj.control) {
-            obj.playerControl();
-        }
-    });
-    requestAnimationFrame(simulate);
+//Rounding function
+function round(number, precision) {
+    let factor = 10 ** precision;
+    return Math.round(number * factor) / factor;
 }
-requestAnimationFrame(simulate);
+//Collision detection
+function checkForCollisions(obj1, obj2) {
+    if (obj1.radius + obj2.radius >= obj2.position.subtract(obj1.position).magnitude()) {
+        return true;
+    } else {
+        return false;
+    }
+}
+//Penetration resolution
+function penetrationResolution(obj1, obj2) {
+    let distance = obj1.position.subtract(obj2.position);
+    let penetrationDepth = obj1.radius + obj2.radius - distance.magnitude();
+    let penetrationResolution = distance.normalize().scaleBy(penetrationDepth / 2);
+    obj1.position = obj1.position.add(penetrationResolution);
+    obj2.position = obj2.position.add(penetrationResolution.scaleBy(-1));
+}
 
 //Player input
 let left, right, down, up;
@@ -55,9 +62,6 @@ document.addEventListener('keyup', function (event) {
     }
 });
 
-//Objects
-let objects = [];
-
 class Vector {
     constructor(x, y) {
         this.x = x;
@@ -73,7 +77,7 @@ class Vector {
         return new Vector(this.x * number, this.y * number);
     }
     magnitude() {
-        return Math.hypot(this.x, this.y);
+        return Math.sqrt(this.x ** 2 + this.y ** 2);
     }
     normalize() {
         if (this.magnitude() === 0) {
@@ -82,12 +86,19 @@ class Vector {
             return new Vector(this.x / this.magnitude(), this.y / this.magnitude());
         }
     }
+    normal() {
+        return new Vector(-this.y, this.x).normalize();
+    }
     draw(startX, startY, n, color) {
         ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineTo(startX + this.x * n, startY + this.y * n);
         ctx.strokeStyle = color;
         ctx.stroke();
+        ctx.closePath();
+    }
+    static dot(vector1, vector2) {
+        return vector1.x * vector2.x + vector1.y * vector2.y;
     }
 }
 
@@ -99,7 +110,6 @@ class Body {
         this.radius = radius;
         this.color = color;
         this.control = false;
-        objects.push(this);
     }
     draw() {
         ctx.beginPath();
@@ -107,10 +117,11 @@ class Body {
         ctx.stroke();
         ctx.fillStyle = this.color;
         ctx.fill();
+        ctx.closePath();
     }
     drawVectors() {
         this.velocity.draw(this.position.x, this.position.y, 10, 'green');
-        this.acceleration.draw(this.position.x, this.position.y, 100, 'blue');
+        this.acceleration.normalize().draw(this.position.x, this.position.y, 100, 'blue');
     }
     switchControl() {
         objects.forEach((object) => object.control = false);
@@ -148,5 +159,39 @@ class Body {
     }
 }
 
-let playerBall = new Body(100, 100, 20, 'red');
-playerBall.switchControl();
+//Simulation
+function simulate(timestamp) {
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    objects.forEach((obj, index) => {
+        obj.draw();
+        obj.calculate();
+        obj.drawVectors();
+        if (obj.control) {
+            obj.playerControl();
+        }
+        for (let i = index + 1; i < objects.length; i++) {
+            if (checkForCollisions(objects[index], objects[i])) {
+                penetrationResolution(objects[index], objects[i]);
+            }
+        }
+    });
+    requestAnimationFrame(simulate);
+}
+requestAnimationFrame(simulate);
+
+const randColor = () => {
+    return "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0').toUpperCase();
+}
+
+function spawn() {
+    objects.push(new Body(Math.floor(Math.random() * 601), Math.floor(Math.random() * 601), Math.floor(Math.random() * 60) + 10, randColor()));
+}
+
+let objects = [];
+let ball1 = new Body(100, 100, 40, 'red');
+objects.push(ball1);
+ball1.switchControl();
+
+for (let i = 0; i < 5; i++) {
+    spawn();
+}
