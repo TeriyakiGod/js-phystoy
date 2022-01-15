@@ -2,7 +2,7 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 //World properties
-let drag = 0.1;
+let drag = 0.02;
 
 //Rounding function
 function round(number, precision) {
@@ -16,6 +16,15 @@ function checkForCollisions(obj1, obj2) {
     } else {
         return false;
     }
+}
+function collisionResolution(obj1, obj2) {
+    let normalVector = obj1.position.subtract(obj2.position).normalize();
+    let relativeVelocityVector = obj1.velocity.subtract(obj2.velocity);
+    let separatingVelocity = Vector.dot(relativeVelocityVector, normalVector);
+    let separatingVelocityVector = normalVector.scaleBy(-separatingVelocity);
+
+    obj1.velocity = obj1.velocity.add(separatingVelocityVector);
+    obj2.velocity = obj2.velocity.add(separatingVelocityVector.scaleBy(-1));
 }
 //Penetration resolution
 function penetrationResolution(obj1, obj2) {
@@ -153,7 +162,6 @@ class Body {
         this.acceleration = this.acceleration.normalize();
         this.velocity = this.velocity.add(this.acceleration);
         this.velocity = this.velocity.scaleBy(1 - drag);
-
         //Calculate Position
         this.position = this.position.add(this.velocity);
     }
@@ -164,7 +172,6 @@ function simulate(timestamp) {
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     objects.forEach((obj, index) => {
         obj.draw();
-        obj.calculate();
         obj.drawVectors();
         if (obj.control) {
             obj.playerControl();
@@ -172,8 +179,10 @@ function simulate(timestamp) {
         for (let i = index + 1; i < objects.length; i++) {
             if (checkForCollisions(objects[index], objects[i])) {
                 penetrationResolution(objects[index], objects[i]);
+                collisionResolution(objects[index], objects[i]);
             }
         }
+        obj.calculate();
     });
     requestAnimationFrame(simulate);
 }
