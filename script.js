@@ -2,41 +2,7 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 //World properties
-let drag = 0.04;
-
-//Rounding function
-function round(number, precision) {
-    let factor = 10 ** precision;
-    return Math.round(number * factor) / factor;
-}
-//Collision detection
-function checkForCollisions(obj1, obj2) {
-    let distance = obj1.position.subtract(obj2.position).magnitude();
-    if (obj1.radius + obj2.radius >= distance) {
-        return true;
-    } else {
-        return false;
-    }
-}
-function collisionResolution(obj1, obj2) {
-    let normalVector = obj1.position.subtract(obj2.position).normalize();
-    let relativeVelocityVector = obj1.velocity.subtract(obj2.velocity);
-    let separatingVelocity = Vector.dot(relativeVelocityVector, normalVector);
-
-    let impulse = ((separatingVelocity * (Math.min(obj1.elasticity, obj2.elasticity)) * -1) - separatingVelocity) / (obj1.inverseMass + obj2.inverseMass);
-    let impulseVector = normalVector.scaleBy(impulse);
-
-    obj1.velocity = obj1.velocity.add(impulseVector.scaleBy(obj1.inverseMass));
-    obj2.velocity = obj2.velocity.add(impulseVector.scaleBy(-obj2.inverseMass));
-}
-//Penetration resolution
-function penetrationResolution(obj1, obj2) {
-    let distanceVector = obj1.position.subtract(obj2.position);
-    let penetrationDepth = obj1.radius + obj2.radius - distanceVector.magnitude();
-    let penetrationResolutionVector = distanceVector.normalize().scaleBy(penetrationDepth / (obj1.inverseMass + obj2.inverseMass));
-    obj1.position = obj1.position.add(penetrationResolutionVector.scaleBy(obj1.inverseMass));
-    obj2.position = obj2.position.add(penetrationResolutionVector.scaleBy(-obj2.inverseMass));
-}
+let drag = 0.05;
 
 //Player input
 let left, right, down, up;
@@ -73,7 +39,6 @@ document.addEventListener('keyup', function (event) {
             break;
     }
 });
-
 class Vector {
     constructor(x, y) {
         this.x = x;
@@ -113,7 +78,6 @@ class Vector {
         return vector1.x * vector2.x + vector1.y * vector2.y;
     }
 }
-
 class Body {
     constructor(x, y, radius, mass, color) {
         this.position = new Vector(x, y);
@@ -182,28 +146,86 @@ class Body {
         this.position = this.position.add(this.velocity);
     }
 }
-
-//Simulation
-function simulate(timestamp) {
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    objects.forEach((obj, index) => {
-        obj.draw();
-        obj.drawDebugInfo();
-        if (obj.control) {
-            obj.playerControl();
-        }
-        for (let i = index + 1; i < objects.length; i++) {
-            if (checkForCollisions(objects[index], objects[i])) {
-                penetrationResolution(objects[index], objects[i]);
-                collisionResolution(objects[index], objects[i]);
-            }
-        }
-        obj.calculate();
-    });
-    requestAnimationFrame(simulate);
+class Wall {
+    constructor(x1, y1, x2, y2) {
+        this.start = new Vector(x1, y1);
+        this.end = new Vector(x2, y2);
+        walls.push(this);
+    }
+    draw() {
+        ctx.beginPath();
+        ctx.moveTo(this.start.x, this.start.y);
+        ctx.lineTo(this.end.x, this.end.y);
+        ctx.strokeStyle = 'black';
+        ctx.stroke();
+        ctx.closePath();
+    }
+    wallVectorNormalized() {
+        return this.end.subtract(this.start).normalize();
+    }
 }
-requestAnimationFrame(simulate);
+//Rounding function
+function round(number, precision) {
+    let factor = 10 ** precision;
+    return Math.round(number * factor) / factor;
+}
+//Collision detection
+function objCollisionDetection(obj1, obj2) {
+    let distance = obj1.position.subtract(obj2.position).magnitude();
+    if (obj1.radius + obj2.radius >= distance) {
+        return true;
+    } else {
+        return false;
+    }
+}
+function wallCollisionDetection(obj, wall) {
+    let objToWallVector = closestPointToWall(obj, wall).subtract(obj.position);
+    if (objToWallVector.magnitude() <= obj.radius) {
+        return true;
+    }
+}
+function objCollisionResolution(obj1, obj2) {
+    let normalVector = obj1.position.subtract(obj2.position).normalize();
+    let relativeVelocityVector = obj1.velocity.subtract(obj2.velocity);
+    let separatingVelocity = Vector.dot(relativeVelocityVector, normalVector);
 
+    let impulse = ((separatingVelocity * (Math.min(obj1.elasticity, obj2.elasticity)) * -1) - separatingVelocity) / (obj1.inverseMass + obj2.inverseMass);
+    let impulseVector = normalVector.scaleBy(impulse);
+
+    obj1.velocity = obj1.velocity.add(impulseVector.scaleBy(obj1.inverseMass));
+    obj2.velocity = obj2.velocity.add(impulseVector.scaleBy(-obj2.inverseMass));
+}
+function wallCollisionResolution(obj, wall) {
+    let normalVector = obj.position.subtract(closestPointToWall(obj, wall)).normalize();
+    let separatingVelocity = Vector.dot(obj.velocity, normalVector);
+    let separatingVelocityDifference = separatingVelocity - (-separatingVelocity * obj.elasticity);
+    obj.velocity = obj.velocity.add(normalVector.scaleBy(-separatingVelocityDifference));
+}
+//Penetration resolution
+function objPenetrationResolution(obj1, obj2) {
+    let distanceVector = obj1.position.subtract(obj2.position);
+    let penetrationDepth = obj1.radius + obj2.radius - distanceVector.magnitude();
+    let penetrationResolutionVector = distanceVector.normalize().scaleBy(penetrationDepth / (obj1.inverseMass + obj2.inverseMass));
+    obj1.position = obj1.position.add(penetrationResolutionVector.scaleBy(obj1.inverseMass));
+    obj2.position = obj2.position.add(penetrationResolutionVector.scaleBy(-obj2.inverseMass));
+}
+function wallPenetrationResolution(obj, wall) {
+    let penetrationVector = obj.position.subtract(closestPointToWall(obj, wall));
+    obj.position = obj.position.add(penetrationVector.normalize().scaleBy(obj.radius - penetrationVector.magnitude()));
+}
+function closestPointToWall(obj, wall) {
+    let wallStartToObjVector = wall.start.subtract(obj.position);
+    if (Vector.dot(wall.wallVectorNormalized(), wallStartToObjVector) > 0) {
+        return wall.start;
+    }
+    let wallEndToObjVector = obj.position.subtract(wall.end);
+    if (Vector.dot(wall.wallVectorNormalized(), wallEndToObjVector) > 0) {
+        return wall.end;
+    }
+    let shortestDistance = Vector.dot(wall.wallVectorNormalized(), wallStartToObjVector);
+    let shortestVector = wall.wallVectorNormalized().scaleBy(shortestDistance);
+    return wall.start.subtract(shortestVector);
+}
 const randColor = () => {
     return "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0').toUpperCase();
 }
@@ -216,12 +238,49 @@ function spawn() {
     let newBody = new Body(randInt(0, 600), randInt(0, 600), sizeAndMass, sizeAndMass, randColor());
     newBody.elasticity = randInt(0, 10) / 10;
 }
+//Simulation---------------------
+function simulate(timestamp) {
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    objects.forEach((obj, index) => {
+        obj.draw();
+        obj.drawDebugInfo();
+        if (obj.control) {
+            obj.playerControl();
+        }
+        walls.forEach((wall) => {
+            if (wallCollisionDetection(objects[index], wall)) {
+                wallPenetrationResolution(objects[index], wall);
+                wallCollisionResolution(objects[index], wall);
+            }
+        });
+        for (let i = index + 1; i < objects.length; i++) {
+            if (objCollisionDetection(objects[index], objects[i])) {
+                objPenetrationResolution(objects[index], objects[i]);
+                objCollisionResolution(objects[index], objects[i]);
+            }
+        }
+        obj.calculate();
+    });
+    walls.forEach((obj, index) => {
+        obj.draw();
+    });
+    requestAnimationFrame(simulate);
+}
+requestAnimationFrame(simulate);
+//--------------------------------
 
 let objects = [];
-let ball1 = new Body(100, 100, 40, 10, 'red');
+let walls = [];
+let ball1 = new Body(100, 100, 40, 40, 'red');
 let staticBall = new Body(200, 200, 30, 0, 'white');
 ball1.switchControl();
 
-for (let i = 0; i < 10; i++) {
+let wallTop = new Wall(0, 0, 600, 0);
+let wallBottom = new Wall(0, 600, 600, 600);
+let wallRight = new Wall(600, 0, 600, 600);
+let wallLeft = new Wall(0, 0, 0, 600);
+let wall5 = new Wall(300, 300, 400, 400);
+
+for (let i = 0; i < 50; i++) {
     spawn();
 }
